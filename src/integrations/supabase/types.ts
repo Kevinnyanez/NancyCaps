@@ -14,7 +14,170 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      caps: {
+        Row: {
+          created_at: string
+          id: number
+          nombre: string
+          numero: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          nombre: string
+          numero: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          nombre?: string
+          numero?: number
+        }
+        Relationships: []
+      }
+      pacientes: {
+        Row: {
+          apellido: string
+          cap_id: number | null
+          created_at: string
+          dni: string
+          edad: number
+          id: number
+          nombre: string
+          updated_at: string
+        }
+        Insert: {
+          apellido: string
+          cap_id?: number | null
+          created_at?: string
+          dni: string
+          edad: number
+          id?: number
+          nombre: string
+          updated_at?: string
+        }
+        Update: {
+          apellido?: string
+          cap_id?: number | null
+          created_at?: string
+          dni?: string
+          edad?: number
+          id?: number
+          nombre?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pacientes_cap_id_fkey"
+            columns: ["cap_id"]
+            isOneToOne: false
+            referencedRelation: "caps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          cap_number: number | null
+          created_at: string
+          email: string
+          id: string
+          role: Database["public"]["Enums"]["user_role"]
+        }
+        Insert: {
+          cap_number?: number | null
+          created_at?: string
+          email: string
+          id: string
+          role?: Database["public"]["Enums"]["user_role"]
+        }
+        Update: {
+          cap_number?: number | null
+          created_at?: string
+          email?: string
+          id?: string
+          role?: Database["public"]["Enums"]["user_role"]
+        }
+        Relationships: []
+      }
+      registros_anticonceptivos: {
+        Row: {
+          anio: number
+          cantidad: number
+          created_at: string
+          created_by: string | null
+          fecha_entrega: string
+          id: number
+          mes: number
+          notas: string | null
+          paciente_id: number | null
+          tipo_anticonceptivo_id: number | null
+        }
+        Insert: {
+          anio: number
+          cantidad?: number
+          created_at?: string
+          created_by?: string | null
+          fecha_entrega?: string
+          id?: number
+          mes: number
+          notas?: string | null
+          paciente_id?: number | null
+          tipo_anticonceptivo_id?: number | null
+        }
+        Update: {
+          anio?: number
+          cantidad?: number
+          created_at?: string
+          created_by?: string | null
+          fecha_entrega?: string
+          id?: number
+          mes?: number
+          notas?: string | null
+          paciente_id?: number | null
+          tipo_anticonceptivo_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "registros_anticonceptivos_paciente_id_fkey"
+            columns: ["paciente_id"]
+            isOneToOne: false
+            referencedRelation: "pacientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "registros_anticonceptivos_tipo_anticonceptivo_id_fkey"
+            columns: ["tipo_anticonceptivo_id"]
+            isOneToOne: false
+            referencedRelation: "tipos_anticonceptivos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tipos_anticonceptivos: {
+        Row: {
+          created_at: string
+          descripcion: string | null
+          id: number
+          marca: string | null
+          nombre: string
+        }
+        Insert: {
+          created_at?: string
+          descripcion?: string | null
+          id?: number
+          marca?: string | null
+          nombre: string
+        }
+        Update: {
+          created_at?: string
+          descripcion?: string | null
+          id?: number
+          marca?: string | null
+          nombre?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +186,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      user_role: "admin" | "cap_user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +313,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      user_role: ["admin", "cap_user"],
+    },
   },
 } as const
