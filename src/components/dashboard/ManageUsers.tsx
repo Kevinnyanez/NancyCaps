@@ -5,16 +5,43 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { UserPlus } from 'lucide-react';
 
 const ManageUsers = () => {
   const [users, setUsers] = useState<any[]>([]);
+  const [caps, setCaps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newUser, setNewUser] = useState({
+    email: '',
+    password: '',
+    capNumber: '',
+  });
   const { toast } = useToast();
 
   useEffect(() => {
     fetchUsers();
+    fetchCaps();
   }, []);
+
+  const fetchCaps = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('caps')
+        .select('*')
+        .order('numero', { ascending: true });
+
+      if (error) throw error;
+      setCaps(data || []);
+    } catch (error) {
+      console.error('Error fetching caps:', error);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -87,13 +114,137 @@ const ManageUsers = () => {
     }
   };
 
+  const createCapUser = async () => {
+    if (!newUser.email || !newUser.password || !newUser.capNumber) {
+      toast({
+        title: 'Error',
+        description: 'Todos los campos son requeridos',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-cap-user`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            email: newUser.email,
+            password: newUser.password,
+            capNumber: parseInt(newUser.capNumber),
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Error al crear usuario');
+      }
+
+      toast({
+        title: 'Usuario creado',
+        description: 'La cuenta del usuario CAP ha sido creada exitosamente',
+      });
+
+      setOpen(false);
+      setNewUser({ email: '', password: '', capNumber: '' });
+      fetchUsers();
+    } catch (error: any) {
+      console.error('Error creating user:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'No se pudo crear el usuario',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <Card className="shadow-soft">
       <CardHeader>
-        <CardTitle>Gestión de Usuarios</CardTitle>
-        <CardDescription>
-          Administra roles y asignaciones de CAP para usuarios
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Gestión de Usuarios</CardTitle>
+            <CardDescription>
+              Administra roles y asignaciones de CAP para usuarios
+            </CardDescription>
+          </div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <UserPlus className="w-4 h-4 mr-2" />
+                Crear Usuario CAP
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Crear Nuevo Usuario CAP</DialogTitle>
+                <DialogDescription>
+                  Crea una nueva cuenta de usuario para un CAP específico
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="usuario@ejemplo.com"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Contraseña</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Contraseña segura"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cap">CAP Asignado</Label>
+                  <Select
+                    value={newUser.capNumber}
+                    onValueChange={(value) => setNewUser({ ...newUser, capNumber: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona un CAP" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {caps.map((cap) => (
+                        <SelectItem key={cap.id} value={cap.numero.toString()}>
+                          CAP {cap.numero} - {cap.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={createCapUser} disabled={creating}>
+                  {creating ? 'Creando...' : 'Crear Usuario'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -123,13 +274,13 @@ const ManageUsers = () => {
                         value={user.cap_number?.toString() || ''}
                         onValueChange={(value) => updateUserCap(user.id, parseInt(value))}
                       >
-                        <SelectTrigger className="w-[120px]">
+                        <SelectTrigger className="w-[180px]">
                           <SelectValue placeholder="Sin asignar" />
                         </SelectTrigger>
                         <SelectContent>
-                          {[1, 2, 3, 4, 5, 6].map((cap) => (
-                            <SelectItem key={cap} value={cap.toString()}>
-                              CAP {cap}
+                          {caps.map((cap) => (
+                            <SelectItem key={cap.id} value={cap.numero.toString()}>
+                              CAP {cap.numero} - {cap.nombre}
                             </SelectItem>
                           ))}
                         </SelectContent>
