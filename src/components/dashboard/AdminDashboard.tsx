@@ -9,6 +9,9 @@ import StatsCards from './StatsCards';
 import MonthlyReport from './MonthlyReport';
 import ManageUsers from './ManageUsers';
 import ManageAnticonceptivos from './ManageAnticonceptivos';
+import ManageCaps from './ManageCaps';
+import ManageInventory from './ManageInventory';
+import NotificationsList from './NotificationsList.tsx';
 
 const AdminDashboard = () => {
   const { signOut, profile } = useAuth();
@@ -56,10 +59,17 @@ const AdminDashboard = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <StatsCards stats={stats} />
+        <div className="grid grid-cols-3 gap-4">
+          <div className="col-span-2">
+            <StatsCards stats={stats} />
+          </div>
+          <div>
+            <NotificationsList admin />
+          </div>
+        </div>
 
         <Tabs defaultValue="report" className="mt-8">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="report" className="gap-2">
               <Activity className="w-4 h-4" />
               Reportes
@@ -71,6 +81,10 @@ const AdminDashboard = () => {
             <TabsTrigger value="anticonceptivos" className="gap-2">
               <Package className="w-4 h-4" />
               Anticonceptivos
+            </TabsTrigger>
+            <TabsTrigger value="inventario" className="gap-2">
+              <Package className="w-4 h-4" />
+              Inventario
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2">
               <Settings className="w-4 h-4" />
@@ -90,15 +104,12 @@ const AdminDashboard = () => {
             <ManageAnticonceptivos />
           </TabsContent>
 
+          <TabsContent value="inventario">
+            <ManageInventory />
+          </TabsContent>
+
           <TabsContent value="settings">
-            <Card>
-              <CardHeader>
-                <CardTitle>Configuración del Sistema</CardTitle>
-                <CardDescription>
-                  Próximamente: Configuración avanzada del sistema
-                </CardDescription>
-              </CardHeader>
-            </Card>
+            <ManageCaps />
           </TabsContent>
         </Tabs>
       </main>

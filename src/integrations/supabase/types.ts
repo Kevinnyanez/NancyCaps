@@ -108,6 +108,7 @@ export type Database = {
           created_by: string | null
           fecha_entrega: string
           id: number
+          cap_id: number | null
           mes: number
           notas: string | null
           paciente_id: number | null
@@ -120,6 +121,7 @@ export type Database = {
           created_by?: string | null
           fecha_entrega?: string
           id?: number
+          cap_id?: number | null
           mes: number
           notas?: string | null
           paciente_id?: number | null
@@ -132,6 +134,7 @@ export type Database = {
           created_by?: string | null
           fecha_entrega?: string
           id?: number
+          cap_id?: number | null
           mes?: number
           notas?: string | null
           paciente_id?: number | null
@@ -161,6 +164,7 @@ export type Database = {
           id: number
           marca: string | null
           nombre: string
+          stock: number
         }
         Insert: {
           created_at?: string
@@ -168,6 +172,7 @@ export type Database = {
           id?: number
           marca?: string | null
           nombre: string
+          stock?: number
         }
         Update: {
           created_at?: string
@@ -175,9 +180,115 @@ export type Database = {
           id?: number
           marca?: string | null
           nombre?: string
+          stock?: number
         }
         Relationships: []
       }
+      inventario_caps: {
+        Row: {
+          cap_id: number
+          created_at: string
+          id: number
+          tipo_anticonceptivo_id: number
+          stock: number
+        }
+        Insert: {
+          cap_id: number
+          created_at?: string
+          id?: number
+          tipo_anticonceptivo_id: number
+          stock?: number
+        }
+        Update: {
+          cap_id?: number
+          created_at?: string
+          id?: number
+          tipo_anticonceptivo_id?: number
+          stock?: number
+        }
+        Relationships: []
+      }
+      inventario_movimientos: {
+        Row: {
+          cantidad: number
+          created_at: string
+          created_by: string | null
+          id: number
+          inventario_id: number
+          paciente_id: number | null
+          registro_id: number | null
+          tipo: string
+        }
+        Insert: {
+          cantidad: number
+          created_at?: string
+          created_by?: string | null
+          id?: number
+          inventario_id: number
+          paciente_id?: number | null
+          registro_id?: number | null
+          tipo: string
+        }
+        Update: {
+          cantidad?: number
+          created_at?: string
+          created_by?: string | null
+          id?: number
+          inventario_id?: number
+          paciente_id?: number | null
+          registro_id?: number | null
+          tipo?: string
+        }
+        Relationships: []
+      }
++      entregas_anticonceptivos: {
++        Row: {
++          cantidad: number
++          created_at: string
++          created_by: string | null
++          fecha_entrega: string
++          id: number
++          paciente_id: number | null
++          tipo_anticonceptivo_id: number | null
++          cap_id: number | null
++        }
++        Insert: {
++          cantidad?: number
++          created_at?: string
++          created_by?: string | null
++          fecha_entrega?: string
++          id?: number
++          paciente_id?: number | null
++          tipo_anticonceptivo_id?: number | null
++          cap_id?: number | null
++        }
++        Update: {
++          cantidad?: number
++          created_at?: string
++          created_by?: string | null
++          fecha_entrega?: string
++          id?: number
++          paciente_id?: number | null
++          tipo_anticonceptivo_id?: number | null
++          cap_id?: number | null
++        }
++        Relationships: [
++          {
++            foreignKeyName: "entregas_anticonceptivos_paciente_id_fkey"
++            columns: ["paciente_id"]
++            isOneToOne: false
++            referencedRelation: "pacientes"
++            referencedColumns: ["id"]
++          },
++          {
++            foreignKeyName: "entregas_anticonceptivos_tipo_anticonceptivo_id_fkey"
++            columns: ["tipo_anticonceptivo_id"]
++            isOneToOne: false
++            referencedRelation: "tipos_anticonceptivos"
++            referencedColumns: ["id"]
++          },
++        ]
++      }
     }
     Views: {
       [_ in never]: never

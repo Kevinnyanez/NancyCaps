@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, FileText, ChevronDown, ChevronRight, Package } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 interface PacientesListProps {
   capNumber: number | null | undefined;
@@ -16,10 +20,23 @@ interface PacientesListProps {
 const PacientesList = ({ capNumber }: PacientesListProps) => {
   const [pacientes, setPacientes] = useState<any[]>([]);
   const [filteredPacientes, setFilteredPacientes] = useState<any[]>([]);
+  const [registrosPorPaciente, setRegistrosPorPaciente] = useState<Record<number, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [capId, setCapId] = useState<number | null>(null);
+  const [expandedPaciente, setExpandedPaciente] = useState<number | null>(null);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [deliveryRegistro, setDeliveryRegistro] = useState<any | null>(null);
+  const [deliveryPacienteSelected, setDeliveryPacienteSelected] = useState<number | null>(null);
+  const [deliveryDateTime, setDeliveryDateTime] = useState<string>('');
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryStock, setDeliveryStock] = useState<number | null>(null);
+  const [deliveryInventario, setDeliveryInventario] = useState<any[]>([]);
+  const [deliverySelectedInventarioId, setDeliverySelectedInventarioId] = useState<number | null>(null);
+  const [deliveryCantidadManual, setDeliveryCantidadManual] = useState<number>(1);
+  const { user } = useAuth();
   const [formData, setFormData] = useState({
     nombre: '',
     apellido: '',
@@ -36,6 +53,16 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
     if (capId) {
       fetchPacientes();
     }
+    const onEntrega = (e: Event) => {
+      // @ts-ignore
+      const d = e?.detail;
+      if (!d) return;
+      // refresh if it's this cap or patient
+      if (d.cap_id === capId || d.paciente_id) fetchPacientes();
+    };
+
+    window.addEventListener('entrega:created', onEntrega as EventListener);
+    return () => window.removeEventListener('entrega:created', onEntrega as EventListener);
   }, [capId]);
 
   useEffect(() => {
@@ -78,6 +105,11 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       if (error) throw error;
       setPacientes(data || []);
       setFilteredPacientes(data || []);
+      
+      // Cargar registros de anticonceptivos para cada paciente
+      if (data && data.length > 0) {
+        fetchRegistrosAnticonceptivos(data.map(p => p.id));
+      }
     } catch (error) {
       console.error('Error fetching pacientes:', error);
       toast({
@@ -87,6 +119,38 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRegistrosAnticonceptivos = async (pacienteIds: number[]) => {
+    if (!pacienteIds || pacienteIds.length === 0) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('registros_anticonceptivos')
+        .select(`
+          *,
+          tipo_anticonceptivo:tipos_anticonceptivos(id, nombre, marca, descripcion)
+        `)
+        .in('paciente_id', pacienteIds)
+        .order('fecha_entrega', { ascending: false });
+
+      if (error) throw error;
+
+      // Agrupar registros por paciente_id
+      const registrosMap: Record<number, any[]> = {};
+      data?.forEach((reg: any) => {
+        if (reg.paciente_id) {
+          if (!registrosMap[reg.paciente_id]) {
+            registrosMap[reg.paciente_id] = [];
+          }
+          registrosMap[reg.paciente_id].push(reg);
+        }
+      });
+
+      setRegistrosPorPaciente(registrosMap);
+    } catch (error) {
+      console.error('Error fetching registros:', error);
     }
   };
 
@@ -103,31 +167,103 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
     }
 
     try {
+      if (editingId) {
+        // Actualizar paciente existente
+        const { error } = await supabase
+          .from('pacientes')
+          .update({
+            nombre: formData.nombre,
+            apellido: formData.apellido,
+            dni: formData.dni,
+            edad: parseInt(formData.edad),
+          })
+          .eq('id', editingId);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Paciente actualizado',
+          description: 'Los datos del paciente se actualizaron correctamente',
+        });
+      } else {
+        // Crear nuevo paciente
+        const { error } = await supabase
+          .from('pacientes')
+          .insert([{
+            ...formData,
+            edad: parseInt(formData.edad),
+            cap_id: capId,
+          }]);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Paciente registrado',
+          description: 'El paciente se agregó correctamente a la planilla',
+        });
+      }
+
+      setOpen(false);
+      setFormData({ nombre: '', apellido: '', dni: '', edad: '' });
+      setEditingId(null);
+      fetchPacientes();
+    } catch (error: any) {
+      console.error('Error saving paciente:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'No se pudo guardar el paciente',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (paciente: any) => {
+    setEditingId(paciente.id);
+    setFormData({
+      nombre: paciente.nombre,
+      apellido: paciente.apellido,
+      dni: paciente.dni,
+      edad: paciente.edad.toString(),
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('¿Estás seguro de eliminar este paciente de la planilla? Esta acción no se puede deshacer.')) return;
+
+    try {
       const { error } = await supabase
         .from('pacientes')
-        .insert([{
-          ...formData,
-          edad: parseInt(formData.edad),
-          cap_id: capId,
-        }]);
+        .delete()
+        .eq('id', id);
 
       if (error) throw error;
 
       toast({
-        title: 'Paciente registrado',
-        description: 'El paciente se agregó correctamente',
+        title: 'Paciente eliminado',
+        description: 'El paciente se eliminó de la planilla correctamente',
       });
-
-      setOpen(false);
-      setFormData({ nombre: '', apellido: '', dni: '', edad: '' });
+      
       fetchPacientes();
     } catch (error: any) {
+      console.error('Error deleting paciente:', error);
       toast({
         title: 'Error',
-        description: error.message || 'No se pudo registrar el paciente',
+        description: error.message || 'No se pudo eliminar el paciente. Verifica que no tenga registros de anticonceptivos asociados.',
         variant: 'destructive',
       });
     }
+  };
+
+  const handleNew = () => {
+    setEditingId(null);
+    setFormData({ nombre: '', apellido: '', dni: '', edad: '' });
+    setOpen(true);
+  };
+
+  const getTotalAnticonceptivos = (pacienteId: number) => {
+    const registros = registrosPorPaciente[pacienteId] || [];
+    return registros.reduce((sum, reg) => sum + reg.cantidad, 0);
   };
 
   return (
@@ -135,69 +271,87 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Lista de Pacientes</CardTitle>
+            <CardTitle>Planilla de Pacientes</CardTitle>
             <CardDescription>
-              Pacientes registrados en tu CAP
+              Gestiona la planilla de pacientes de tu CAP. Puedes agregar, editar y eliminar pacientes.
+              Haz clic en una fila para ver los anticonceptivos que necesita cada paciente este mes.
             </CardDescription>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={handleNew}>
                 <Plus className="w-4 h-4 mr-2" />
-                Nueva Paciente
+                Nuevo Paciente
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Registrar Nueva Paciente</DialogTitle>
+                <DialogTitle>
+                  {editingId ? 'Editar' : 'Nuevo'} Paciente
+                </DialogTitle>
                 <DialogDescription>
-                  Complete la información de la paciente
+                  {editingId 
+                    ? 'Modifica los datos del paciente en la planilla'
+                    : 'Complete la información para agregar un nuevo paciente a la planilla'}
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSubmit}>
                 <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="nombre">Nombre *</Label>
-                    <Input
-                      id="nombre"
-                      value={formData.nombre}
-                      onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                      required
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="nombre">Nombre *</Label>
+                      <Input
+                        id="nombre"
+                        value={formData.nombre}
+                        onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                        placeholder="Ej: María"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="apellido">Apellido *</Label>
+                      <Input
+                        id="apellido"
+                        value={formData.apellido}
+                        onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
+                        placeholder="Ej: González"
+                        required
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="apellido">Apellido *</Label>
-                    <Input
-                      id="apellido"
-                      value={formData.apellido}
-                      onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dni">DNI *</Label>
-                    <Input
-                      id="dni"
-                      value={formData.dni}
-                      onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="edad">Edad *</Label>
-                    <Input
-                      id="edad"
-                      type="number"
-                      min="1"
-                      max="120"
-                      value={formData.edad}
-                      onChange={(e) => setFormData({ ...formData, edad: e.target.value })}
-                      required
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dni">DNI *</Label>
+                      <Input
+                        id="dni"
+                        value={formData.dni}
+                        onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
+                        placeholder="Ej: 12345678"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edad">Edad *</Label>
+                      <Input
+                        id="edad"
+                        type="number"
+                        min="1"
+                        max="120"
+                        value={formData.edad}
+                        onChange={(e) => setFormData({ ...formData, edad: e.target.value })}
+                        placeholder="Ej: 25"
+                        required
+                      />
+                    </div>
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button type="submit">Registrar</Button>
+                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit">
+                    {editingId ? 'Actualizar' : 'Registrar'} Paciente
+                  </Button>
                 </DialogFooter>
               </form>
             </DialogContent>
@@ -217,34 +371,356 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-center text-muted-foreground">Cargando...</p>
+          <p className="text-center text-muted-foreground py-8">Cargando planilla...</p>
         ) : filteredPacientes.length === 0 ? (
-          <p className="text-center text-muted-foreground">
-            {searchTerm ? 'No se encontraron pacientes' : 'No hay pacientes registrados'}
-          </p>
+          <div className="text-center py-8">
+            <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-muted-foreground mb-4">
+              {searchTerm ? 'No se encontraron pacientes' : 'La planilla está vacía'}
+            </p>
+            {!searchTerm && (
+              <Button onClick={handleNew}>
+                <Plus className="w-4 h-4 mr-2" />
+                Agregar Primer Paciente
+              </Button>
+            )}
+          </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Apellido</TableHead>
-                <TableHead>DNI</TableHead>
-                <TableHead className="text-right">Edad</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredPacientes.map((paciente) => (
-                <TableRow key={paciente.id}>
-                  <TableCell className="font-medium">{paciente.nombre}</TableCell>
-                  <TableCell>{paciente.apellido}</TableCell>
-                  <TableCell>{paciente.dni}</TableCell>
-                  <TableCell className="text-right">{paciente.edad}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="space-y-2">
+            {filteredPacientes.map((paciente, index) => {
+              const registros = registrosPorPaciente[paciente.id] || [];
+              const totalAnticonceptivos = getTotalAnticonceptivos(paciente.id);
+              const isExpanded = expandedPaciente === paciente.id;
+
+              return (
+                <Collapsible
+                  key={paciente.id}
+                  open={isExpanded}
+                  onOpenChange={(open) => setExpandedPaciente(open ? paciente.id : null)}
+                >
+                  <Card className="border">
+                    <CollapsibleTrigger asChild>
+                      <div className="p-4 cursor-pointer hover:bg-muted/50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 flex-1">
+                            <div className="w-8 text-center text-muted-foreground font-medium">
+                              {index + 1}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3">
+                                <div className="font-semibold">
+                                  {paciente.apellido}, {paciente.nombre}
+                                </div>
+                                <Badge variant="outline">DNI: {paciente.dni}</Badge>
+                                <Badge variant="secondary">{paciente.edad} años</Badge>
+                                {registros.length > 0 && (
+                                  <Badge className="bg-primary/10 text-primary">
+                                    <Package className="w-3 h-3 mr-1" />
+                                    {registros.length} necesidad(es) - {totalAnticonceptivos} unidades
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEdit(paciente);
+                              }}
+                              title="Editar paciente"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(paciente.id);
+                              }}
+                              title="Eliminar paciente"
+                            >
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!capId) return;
+                                setDeliveryRegistro(null);
+                                setDeliveryPacienteSelected(paciente.id);
+                                setDeliveryLoading(true);
+                                try {
+                                  const { data } = await supabase
+                                    .from('inventario_caps')
+                                    .select('id, stock, tipo:tipos_anticonceptivos(id, nombre, marca)')
+                                    .eq('cap_id', capId)
+                                    .order('tipo_anticonceptivo_id');
+
+                                  setDeliveryInventario(data || []);
+                                } catch (err) {
+                                  setDeliveryInventario([]);
+                                } finally {
+                                  setDeliveryLoading(false);
+                                  setDeliveryOpen(true);
+                                }
+                              }}
+                              title="Registrar entrega manual"
+                            >
+                              Registrar Entrega
+                            </Button>
+                            {isExpanded ? (
+                              <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="px-4 pb-4 border-t">
+                        {registros.length === 0 ? (
+                          <div className="py-6 text-center text-muted-foreground">
+                            <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>No hay registros de anticonceptivos necesarios</p>
+                            <p className="text-xs mt-1">Si el paciente necesita un anticonceptivo, puede registrar la entrega manualmente desde "Registrar Entrega" o usar la vista "Entregas".</p>
+                          </div>
+                        ) : (
+                          <div className="pt-4">
+                            <h4 className="font-semibold mb-3 text-sm">Anticonceptivos Necesarios:</h4>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Fecha Solicitud</TableHead>
+                                  <TableHead>Tipo</TableHead>
+                                  <TableHead>Marca</TableHead>
+                                  <TableHead className="text-center">Cantidad Necesaria</TableHead>
+                                  <TableHead>Mes/Año</TableHead>
+                                  <TableHead>Notas</TableHead>
+                                      <TableHead className="text-right">Acciones</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {registros.map((reg: any) => (
+                                  <TableRow key={reg.id}>
+                                    <TableCell className="font-medium">
+                                      {new Date(reg.fecha_entrega).toLocaleDateString('es-AR')}
+                                    </TableCell>
+                                    <TableCell>{reg.tipo_anticonceptivo?.nombre || 'Desconocido'}</TableCell>
+                                    <TableCell>{reg.tipo_anticonceptivo?.marca || '-'}</TableCell>
+                                    <TableCell className="text-center font-semibold">
+                                      {reg.cantidad}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline">
+                                        {reg.mes}/{reg.anio}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground max-w-xs truncate" title={reg.notas || ''}>
+                                      {reg.notas || '-'}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <Button
+                                        size="sm"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          // open delivery modal
+                                          setDeliveryRegistro(reg);
+                                          // set default datetime local
+                                          const now = new Date();
+                                          const local = now.toISOString().slice(0,16);
+                                          setDeliveryDateTime(local);
+                                          setDeliveryLoading(true);
+                                          // fetch current stock for this tipo
+                                          try {
+                                            const { data: inv } = await supabase
+                                              .from('inventario_caps')
+                                              .select('stock')
+                                              .eq('cap_id', capId)
+                                              .eq('tipo_anticonceptivo_id', reg.tipo_anticonceptivo_id)
+                                              .maybeSingle();
+
+                                            setDeliveryStock(inv?.stock ?? null);
+                                          } catch (err) {
+                                            setDeliveryStock(null);
+                                          } finally {
+                                            setDeliveryLoading(false);
+                                            setDeliveryOpen(true);
+                                          }
+                                        }}
+                                      >
+                                        Registrar Entrega
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                            <div className="mt-3 text-sm text-muted-foreground text-center">
+                              Total: <strong>{totalAnticonceptivos} unidades</strong> necesarias este mes
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
+              );
+            })}
+          </div>
+        )}
+        {filteredPacientes.length > 0 && (
+          <div className="mt-4 text-sm text-muted-foreground text-center">
+            Total de pacientes en la planilla: <strong>{filteredPacientes.length}</strong>
+          </div>
         )}
       </CardContent>
+
+      <Dialog open={deliveryOpen} onOpenChange={setDeliveryOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar Entrega</DialogTitle>
+            <DialogDescription>Registre la entrega para el paciente seleccionado (fecha y hora).</DialogDescription>
+          </DialogHeader>
+          {deliveryRegistro ? (
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!capId) {
+                toast({ title: 'Error', description: 'No se pudo determinar el CAP', variant: 'destructive' });
+                return;
+              }
+
+              setDeliveryLoading(true);
+              try {
+                const fechaIso = new Date(deliveryDateTime).toISOString();
+                const { error } = await supabase.from('entregas_anticonceptivos').insert([{
+                  paciente_id: deliveryRegistro.paciente_id,
+                  tipo_anticonceptivo_id: deliveryRegistro.tipo_anticonceptivo_id,
+                  cantidad: deliveryRegistro.cantidad,
+                  fecha_entrega: fechaIso,
+                  created_by: user?.id || null,
+                  cap_id: capId,
+                }]);
+
+                if (error) throw error;
+
+                toast({ title: 'Entrega registrada', description: 'La entrega se registró correctamente' });
+                setDeliveryOpen(false);
+                setDeliveryRegistro(null);
+                // refresh registros list
+                fetchPacientes();
+              } catch (err: any) {
+                toast({ title: 'Error', description: err.message || 'No se pudo registrar la entrega', variant: 'destructive' });
+              } finally {
+                setDeliveryLoading(false);
+              }
+            }}>
+              <div className="space-y-4 py-2">
+                <div>
+                  <div className="text-sm font-medium">Paciente</div>
+                  <div className="text-sm">{deliveryRegistro?.paciente_id}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium">Tipo</div>
+                  <div className="text-sm">{deliveryRegistro?.tipo_anticonceptivo?.nombre}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium">Cantidad</div>
+                  <div className="text-sm">{deliveryRegistro?.cantidad}</div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Fecha y hora de entrega</Label>
+                  <Input type="datetime-local" value={deliveryDateTime} onChange={(e) => setDeliveryDateTime(e.target.value)} required />
+                </div>
+                {deliveryStock !== null && (
+                  <div className="text-sm text-muted-foreground">Stock disponible en CAP: <strong>{deliveryStock}</strong></div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeliveryOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={deliveryLoading || (deliveryStock !== null && deliveryStock < (deliveryRegistro?.cantidad || 1))}>
+                  {deliveryLoading ? 'Registrando...' : 'Confirmar Entrega'}
+                </Button>
+              </DialogFooter>
+            </form>
+            ) : (
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (!capId || !deliveryPacienteSelected || !deliverySelectedInventarioId) {
+                  toast({ title: 'Error', description: 'Complete paciente e ítem a entregar', variant: 'destructive' });
+                  return;
+                }
+
+                setDeliveryLoading(true);
+                try {
+                  const inv = deliveryInventario.find((i) => i.id === deliverySelectedInventarioId);
+                  if (!inv) throw new Error('Inventario inválido');
+                  if (inv.stock < deliveryCantidadManual) throw new Error('Stock insuficiente');
+
+                  const fechaIso = new Date(deliveryDateTime).toISOString();
+                  const { error } = await supabase.from('entregas_anticonceptivos').insert([{
+                    paciente_id: deliveryPacienteSelected,
+                    tipo_anticonceptivo_id: inv.tipo.id,
+                    cantidad: deliveryCantidadManual,
+                    fecha_entrega: fechaIso,
+                    created_by: user?.id || null,
+                    cap_id: capId,
+                  }]);
+
+                  if (error) throw error;
+
+                  toast({ title: 'Entrega registrada', description: 'La entrega se registró correctamente' });
+                  setDeliveryOpen(false);
+                  setDeliveryPacienteSelected(null);
+                  setDeliverySelectedInventarioId(null);
+                  setDeliveryCantidadManual(1);
+                  fetchPacientes();
+                } catch (err: any) {
+                  toast({ title: 'Error', description: err.message || 'No se pudo registrar la entrega', variant: 'destructive' });
+                } finally {
+                  setDeliveryLoading(false);
+                }
+              }}>
+                <div className="space-y-4 py-2">
+                  <div>
+                    <div className="text-sm font-medium">Paciente</div>
+                    <div className="text-sm">{filteredPacientes.find(p => p.id === deliveryPacienteSelected)?.apellido}, {filteredPacientes.find(p => p.id === deliveryPacienteSelected)?.nombre}</div>
+                  </div>
+                  <div>
+                    <Label>Anticonceptivo (stock disponible)</Label>
+                    <Select onValueChange={(v) => setDeliverySelectedInventarioId(parseInt(v || '0'))} value={deliverySelectedInventarioId?.toString() || ''}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar anticonceptivo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {deliveryInventario.map((i) => (
+                          <SelectItem key={i.id} value={i.id.toString()}>{i.tipo.nombre} {i.tipo.marca ? `- ${i.tipo.marca}` : ''} • Disponible: {i.stock}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Cantidad</Label>
+                    <Input type="number" min={1} value={deliveryCantidadManual} onChange={(e) => setDeliveryCantidadManual(parseInt(e.target.value || '1'))} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Fecha y hora de entrega</Label>
+                    <Input type="datetime-local" value={deliveryDateTime} onChange={(e) => setDeliveryDateTime(e.target.value)} />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDeliveryOpen(false)}>Cancelar</Button>
+                  <Button type="submit" disabled={deliveryLoading || !deliverySelectedInventarioId}>{deliveryLoading ? 'Registrando...' : 'Confirmar Entrega'}</Button>
+                </DialogFooter>
+              </form>
+            )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

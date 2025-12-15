@@ -46,9 +46,10 @@ const ManageAnticonceptivos = () => {
     
     try {
       if (editingId) {
+        const payload = { ...formData };
         const { error } = await supabase
           .from('tipos_anticonceptivos')
-          .update(formData)
+          .update(payload)
           .eq('id', editingId);
 
         if (error) throw error;
@@ -58,9 +59,10 @@ const ManageAnticonceptivos = () => {
           description: 'Los cambios se guardaron correctamente',
         });
       } else {
+        const payload = { ...formData };
         const { error } = await supabase
           .from('tipos_anticonceptivos')
-          .insert([formData]);
+          .insert([payload]);
 
         if (error) throw error;
 
@@ -172,6 +174,7 @@ const ManageAnticonceptivos = () => {
                       onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
                     />
                   </div>
+                  
                 </div>
                 <DialogFooter>
                   <Button type="submit">Guardar</Button>

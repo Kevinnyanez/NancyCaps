@@ -4,9 +4,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { LogOut, Users, FileText } from 'lucide-react';
+import { LogOut, Users, FileText, Bell, Archive } from 'lucide-react';
 import PacientesList from './PacientesList';
-import RegistroForm from './RegistroForm';
+import NotificationsList from './NotificationsList.tsx';
+import Entregas from './Entregas.tsx';
+import CapInventory from './CapInventory';
 
 const CapUserDashboard = () => {
   const { signOut, profile } = useAuth();
@@ -53,14 +55,22 @@ const CapUserDashboard = () => {
 
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="pacientes" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="pacientes" className="gap-2">
               <Users className="w-4 h-4" />
               Pacientes
             </TabsTrigger>
-            <TabsTrigger value="registros" className="gap-2">
+            <TabsTrigger value="inventario" className="gap-2">
+              <Archive className="w-4 h-4" />
+              Inventario
+            </TabsTrigger>
+            <TabsTrigger value="entregas" className="gap-2">
               <FileText className="w-4 h-4" />
-              Nuevo Registro
+              Entregas
+            </TabsTrigger>
+            <TabsTrigger value="notifs" className="gap-2">
+              <Bell className="w-4 h-4" />
+              Notificaciones
             </TabsTrigger>
           </TabsList>
 
@@ -68,8 +78,16 @@ const CapUserDashboard = () => {
             <PacientesList capNumber={profile?.cap_number} />
           </TabsContent>
 
-          <TabsContent value="registros">
-            <RegistroForm capNumber={profile?.cap_number} />
+          <TabsContent value="entregas">
+            <Entregas />
+          </TabsContent>
+
+          <TabsContent value="inventario">
+            <CapInventory />
+          </TabsContent>
+
+          <TabsContent value="notifs">
+            <NotificationsList capId={capInfo?.id || null} />
           </TabsContent>
         </Tabs>
       </main>

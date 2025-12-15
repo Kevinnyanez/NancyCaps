@@ -128,13 +128,18 @@ const ManageUsers = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
+      if (!session?.access_token) {
+        throw new Error('No hay sesión activa. Por favor inicia sesión nuevamente.');
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-cap-user`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '',
           },
           body: JSON.stringify({
             email: newUser.email,
@@ -143,6 +148,11 @@ const ManageUsers = () => {
           }),
         }
       );
+
+      // Manejar errores de CORS o red
+      if (!response.ok && response.status === 0) {
+        throw new Error('Error de conexión. Verifica que la función Edge Function esté desplegada en Supabase.');
+      }
 
       const result = await response.json();
 
