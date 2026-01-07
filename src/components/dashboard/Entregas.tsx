@@ -26,6 +26,9 @@ const Entregas = ({ preselectedPaciente = null }: EntregasProps) => {
   const [cantidad, setCantidad] = useState<number>(1);
   const [fechaHora, setFechaHora] = useState<string>(new Date().toISOString().slice(0,16));
   const [loading, setLoading] = useState(false);
+  const [alreadyDelivered, setAlreadyDelivered] = useState<boolean>(false);
+  const [existingDeliveries, setExistingDeliveries] = useState<any[]>([]);
+  const [capsMap, setCapsMap] = useState<Record<number,string>>({});
   const { toast } = useToast();
 
   useEffect(() => {
@@ -56,6 +59,64 @@ const Entregas = ({ preselectedPaciente = null }: EntregasProps) => {
     };
     load();
   }, [capId]);
+
+  // Verificar si ya se entregó el tipo elegido a este paciente en el mes seleccionado (incluye otras CAPs por DNI)
+  useEffect(() => {
+    const check = async () => {
+      if (!selectedPaciente || !fechaHora) { setAlreadyDelivered(false); setExistingDeliveries([]); return; }
+      const paciente = pacientes.find(p => p.id === selectedPaciente);
+      const dni = paciente?.dni;
+      if (!dni) { setAlreadyDelivered(false); setExistingDeliveries([]); return; }
+
+      const fecha = new Date(fechaHora);
+      const start = new Date(fecha);
+      start.setDate(1); start.setHours(0,0,0,0);
+      const next = new Date(start); next.setMonth(start.getMonth() + 1);
+
+      try {
+        // Buscar todos los pacientes con el mismo DNI (posibles otros CAPs)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: samePacs } = await (supabase as any).from('pacientes').select('id, cap_id').eq('dni', dni);
+        const ids = (samePacs || []).map((s: any) => s.id);
+        if (ids.length === 0) { setAlreadyDelivered(false); setExistingDeliveries([]); return; }
+
+        // Buscar entregas realizadas a esos pacientes en el mismo mes
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await (supabase as any).from('entregas_anticonceptivos')
+          .select('id, cantidad, fecha_entrega, tipo_anticonceptivo_id, cap_id, paciente_id')
+          .in('paciente_id', ids)
+          .gte('fecha_entrega', start.toISOString())
+          .lt('fecha_entrega', next.toISOString());
+
+        const entregas = res?.data || [];
+        setExistingDeliveries(entregas);
+
+        // Obtener mapas de CAPS para mostrar número
+        const capIds = Array.from(new Set(entregas.map((e: any) => e.cap_id).filter(Boolean)));
+        if (capIds.length > 0) {
+          const { data: caps } = await (supabase as any).from('caps').select('id, numero').in('id', capIds);
+          const map: Record<number,string> = {};
+          (caps || []).forEach((c: any) => { map[c.id] = c.numero; });
+          setCapsMap(map);
+        } else {
+          setCapsMap({});
+        }
+
+        // Determinar si ya recibió el mismo tipo
+        const tipoId = selectedInventarioId ? inventario.find(i => i.id === selectedInventarioId)?.tipo.id : null;
+        if (tipoId) {
+          setAlreadyDelivered(entregas.some((e: any) => e.tipo_anticonceptivo_id === tipoId));
+        } else {
+          setAlreadyDelivered(entregas.length > 0);
+        }
+      } catch (err) {
+        setAlreadyDelivered(false);
+        setExistingDeliveries([]);
+      }
+    };
+
+    check();
+  }, [selectedPaciente, selectedInventarioId, fechaHora, inventario, pacientes]);
 
   useEffect(() => {
     if (preselectedPaciente) setSelectedPaciente(preselectedPaciente);
@@ -98,13 +159,21 @@ const Entregas = ({ preselectedPaciente = null }: EntregasProps) => {
 
     setLoading(true);
     try {
+      // Advertencia: si hay entregas previas en el mes (en cualquier CAP con mismo DNI), avisar pero permitir registro
+      const fechaIso = new Date(fechaHora).toISOString();
+      if (existingDeliveries && existingDeliveries.length > 0) {
+        const caps = Array.from(new Set(existingDeliveries.map((e: any) => capsMap[e.cap_id] || e.cap_id)));
+        const dates = existingDeliveries.map((e: any) => new Date(e.fecha_entrega).toLocaleDateString('es-AR'));
+        toast({ title: 'Aviso', description: `Se detectaron entregas previas (${caps.join(', ')} • ${dates.join(', ')}). Se procederá a registrar igualmente.`, variant: 'warning' });
+      }
+
       // use any to avoid strict generated types mismatch
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase as any).from('entregas_anticonceptivos').insert([{
         paciente_id: selectedPaciente,
         tipo_anticonceptivo_id: inv.tipo.id,
         cantidad,
-        fecha_entrega: new Date(fechaHora).toISOString(),
+        fecha_entrega: fechaIso,
         created_by: user?.id || null,
         cap_id: capId,
       }]);
@@ -153,6 +222,20 @@ const Entregas = ({ preselectedPaciente = null }: EntregasProps) => {
                 ))}
               </SelectContent>
             </Select>
+            {(alreadyDelivered || (existingDeliveries && existingDeliveries.length > 0)) && (
+              <div className="mt-2">
+                {alreadyDelivered && <div className="text-sm text-destructive">Este paciente ya recibió este anticonceptivo en el periodo seleccionado.</div>}
+                {(existingDeliveries || []).length > 0 && (
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Entregas en el mismo mes: {(existingDeliveries || []).map((e, idx) => (
+                      <div key={e.id} className="text-xs">
+                        CAP {capsMap[e.cap_id] || e.cap_id} • {new Date(e.fecha_entrega).toLocaleString('es-AR')} • Cantidad: {e.cantidad}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

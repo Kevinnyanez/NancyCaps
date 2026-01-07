@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,17 +18,32 @@ const ManageInventory = () => {
   const [capId, setCapId] = useState<number | null>(null);
   const [selectedTipo, setSelectedTipo] = useState<number | null>(null);
   const [stock, setStock] = useState<number>(0);
+  const [prevStock, setPrevStock] = useState<number | null>(null);
   const [inventories, setInventories] = useState<any[]>([]);
   const [search, setSearch] = useState<string>('');
   const [showLowOnly, setShowLowOnly] = useState<boolean>(false);
   const [movementsOpen, setMovementsOpen] = useState(false);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
   const [movements, setMovements] = useState<any[]>([]);
+  const stockRef = useRef<HTMLInputElement | null>(null);
+  const editingStockRef = useRef<HTMLInputElement | null>(null);
+  const [editingInventoryId, setEditingInventoryId] = useState<number | null>(null);
+  const [editingStock, setEditingStock] = useState<number>(0);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchCaps();
     fetchAnticonceptivos();
+
+    // Listener para abrir y preseleccionar cap desde reporte de entregas
+    const handler = (e: CustomEvent) => {
+      const cid = e?.detail?.capId;
+      if (cid) setCapId(cid);
+    };
+    window.addEventListener('manage-inventory:open', handler as EventListener);
+
+    return () => window.removeEventListener('manage-inventory:open', handler as EventListener);
   }, []);
 
   useEffect(() => {
@@ -53,14 +69,24 @@ const ManageInventory = () => {
       .maybeSingle();
 
     setStock(data?.stock ?? 0);
+    setPrevStock(data?.stock ?? null);
   };
 
+  const isValidId = (v: any) => typeof v === 'number' && !isNaN(v);
+
   const fetchInventories = async (capId: number) => {
-    const { data } = await supabase
+    if (!isValidId(capId)) return;
+    const { data, error } = await supabase
       .from('inventario_caps')
       .select('id, stock, tipo_anticonceptivo_id, tipo:tipos_anticonceptivos(id, nombre, marca)')
       .eq('cap_id', capId)
       .order('tipo_anticonceptivo_id');
+
+    if (error) {
+      console.error('Error fetching inventories', error, error?.message, error?.details);
+      setInventories([]);
+      return;
+    }
 
     setInventories(data || []);
   };
@@ -89,12 +115,74 @@ const ManageInventory = () => {
 
       if (error) throw error;
 
+      // Registrar movimiento si hubo incremento/disminución (solo admins pueden insertar movimientos segun policies)
+      if (prevStock !== null && prevStock !== stock) {
+        const delta = stock - prevStock;
+        const tipoMov = delta > 0 ? 'in' : 'out';
+
+        const { error: moveError } = await supabase.from('inventario_movimientos').insert([{
+          inventario_id: (await supabase.from('inventario_caps').select('id').eq('cap_id', capId).eq('tipo_anticonceptivo_id', selectedTipo).maybeSingle())?.data?.id,
+          tipo: tipoMov,
+          cantidad: Math.abs(delta),
+          paciente_id: null,
+          created_by: user?.id,
+        }]);
+
+        if (moveError) console.error('Error creating movement:', moveError);
+      }
+
       toast({ title: 'Guardado', description: 'Stock actualizado correctamente' });
       fetchInventories(capId);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'No se pudo actualizar stock', variant: 'destructive' });
     }
   };
+
+  const handleSaveRow = async (inv: any) => {
+    try {
+      const newStock = editingStock;
+
+      // If the inventory row exists, perform an update to avoid accidental inserts/overwrites
+      if (inv?.id) {
+        const { data, error } = await supabase.from('inventario_caps').update({ stock: newStock }).eq('id', inv.id).select().maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error('No se pudo encontrar el registro para actualizar');
+      } else {
+        // fallback to upsert when no id is present
+        const { error } = await supabase.from('inventario_caps').upsert([
+          { cap_id: inv.cap_id, tipo_anticonceptivo_id: inv.tipo_anticonceptivo_id, stock: newStock },
+        ]);
+        if (error) throw error;
+      }
+
+      if (inv.stock !== null && inv.stock !== undefined && inv.stock !== newStock) {
+        const delta = newStock - inv.stock;
+        const tipoMov = delta > 0 ? 'in' : 'out';
+        const { error: moveError } = await supabase.from('inventario_movimientos').insert([{
+          inventario_id: inv.id,
+          tipo: tipoMov,
+          cantidad: Math.abs(delta),
+          paciente_id: null,
+          created_by: user?.id,
+        }]);
+        if (moveError) console.error('Error creating movement:', moveError);
+      }
+
+      // Update local state immediately to avoid UI reflows/accordion collapse
+      setInventories((prev) => prev.map((p) => (p.id === inv.id ? { ...p, stock: newStock } : p)));
+      // Close editor
+      setEditingInventoryId(null);
+      toast({ title: 'Guardado', description: 'Stock actualizado correctamente' });
+      // Fetch in background to make sure server and UI stay in sync (delayed to avoid focus jumps)
+      setTimeout(() => fetchInventories(inv.cap_id), 1000);
+    } catch (err: any) {
+      console.error('Error saving inventory row:', err);
+      toast({ title: 'Error', description: err.message || 'No se pudo actualizar stock', variant: 'destructive' });
+      // re-fetch to restore the view
+      if (inv?.cap_id) fetchInventories(inv.cap_id);
+    }
+  };
+
 
   return (
     <Card>
@@ -147,7 +235,7 @@ const ManageInventory = () => {
 
           <div>
             <Label>Stock</Label>
-            <Input type="number" min={0} value={stock} onChange={(e) => setStock(parseInt(e.target.value || '0'))} />
+            <Input ref={stockRef as any} type="number" min={0} value={stock} onChange={(e) => setStock(parseInt(e.target.value || '0'))} />
           </div>
         </div>
 
@@ -178,49 +266,67 @@ const ManageInventory = () => {
                     <TableCell className="font-medium">{inv.tipo?.nombre}</TableCell>
                     <TableCell>{inv.tipo?.marca || '-'}</TableCell>
                     <TableCell>
-                      {inv.stock <= 0 ? (
-                        <Badge variant="destructive">{inv.stock}</Badge>
-                      ) : inv.stock <= 5 ? (
-                        <Badge variant="secondary">{inv.stock}</Badge>
+                      {editingInventoryId === inv.id ? (
+                        <Input ref={editingStockRef as any} type="number" min={0} value={editingStock} onChange={(e) => setEditingStock(parseInt(e.target.value || '0'))} className="w-24" />
                       ) : (
-                        <Badge variant="outline">{inv.stock}</Badge>
+                        inv.stock <= 0 ? (
+                          <Badge variant="destructive">{inv.stock}</Badge>
+                        ) : inv.stock <= 5 ? (
+                          <Badge variant="secondary">{inv.stock}</Badge>
+                        ) : (
+                          <Badge variant="outline">{inv.stock}</Badge>
+                        )
                       )}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
-                      <Button variant="ghost" size="sm" onClick={() => { setSelectedTipo(inv.tipo_anticonceptivo_id); setStock(inv.stock); }}>
-                        Editar
-                      </Button>
-                      <Dialog open={movementsOpen && selectedInventoryId === inv.id} onOpenChange={(o) => { setMovementsOpen(o); if (!o) { setSelectedInventoryId(null); setMovements([]); } }}>
-                        <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm" onClick={async () => { setSelectedInventoryId(inv.id); setMovementsOpen(true); await fetchMovements(inv.id); }}>
-                            Ver Movimientos
+                      {editingInventoryId === inv.id ? (
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" onClick={() => handleSaveRow(inv)}>Guardar</Button>
+                          <Button variant="ghost" size="sm" onClick={() => setEditingInventoryId(null)}>Cancelar</Button>
+                        </div>
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            // Solo activar edición inline para esta fila (no cambiar filtros superiores)
+                            setEditingInventoryId(inv.id);
+                            setEditingStock(inv.stock);
+                            setTimeout(() => (editingStockRef.current as any)?.focus?.(), 0);
+                          }}>
+                            Editar
                           </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Movimientos - {inv.tipo?.nombre}</DialogTitle>
-                          </DialogHeader>
-                          <div className="py-2">
-                            {movements.length === 0 ? (
-                              <p className="text-sm text-muted-foreground">Sin movimientos</p>
-                            ) : (
-                              <ul className="space-y-2">
-                                {movements.map((m) => (
-                                  <li key={m.id} className="flex justify-between">
-                                    <div>
-                                      <div className="text-sm">{m.tipo === 'in' ? 'Ingreso' : 'Egreso'} • {m.cantidad}</div>
-                                      <div className="text-xs text-muted-foreground">{m.paciente ? `${m.paciente.apellido}, ${m.paciente.nombre}` : m.created_by} • {format(new Date(m.created_at), 'yyyy-MM-dd HH:mm')}</div>
-                                    </div>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                          <DialogFooter>
-                            <Button onClick={() => setMovementsOpen(false)}>Cerrar</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
+                          <Dialog open={movementsOpen && selectedInventoryId === inv.id} onOpenChange={(o) => { setMovementsOpen(o); if (!o) { setSelectedInventoryId(null); setMovements([]); } }}>
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={async () => { setSelectedInventoryId(inv.id); setMovementsOpen(true); await fetchMovements(inv.id); }}>
+                                Ver Movimientos
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Movimientos - {inv.tipo?.nombre}</DialogTitle>
+                              </DialogHeader>
+                              <div className="py-2">
+                                {movements.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground">Sin movimientos</p>
+                                ) : (
+                                  <ul className="space-y-2">
+                                    {movements.map((m) => (
+                                      <li key={m.id} className="flex justify-between">
+                                        <div>
+                                          <div className="text-sm">{m.tipo === 'in' ? 'Ingreso' : 'Egreso'} • {m.cantidad}</div>
+                                          <div className="text-xs text-muted-foreground">{m.paciente ? `${m.paciente.apellido}, ${m.paciente.nombre}` : m.created_by} • {format(new Date(m.created_at), 'yyyy-MM-dd HH:mm')}</div>
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                              <DialogFooter>
+                                <Button onClick={() => setMovementsOpen(false)}>Cerrar</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

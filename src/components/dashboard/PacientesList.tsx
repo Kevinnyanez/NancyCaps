@@ -21,6 +21,8 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
   const [pacientes, setPacientes] = useState<any[]>([]);
   const [filteredPacientes, setFilteredPacientes] = useState<any[]>([]);
   const [registrosPorPaciente, setRegistrosPorPaciente] = useState<Record<number, any[]>>({});
+  const [entregasPorDni, setEntregasPorDni] = useState<Record<string, any[]>>({});
+  const [capNumbers, setCapNumbers] = useState<Record<number,string>>({});
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -109,6 +111,53 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       // Cargar registros de anticonceptivos para cada paciente
       if (data && data.length > 0) {
         fetchRegistrosAnticonceptivos(data.map(p => p.id));
+        // Cargar entregas del mes actual para marcar como entregado (incluye entregas en otras CAPs con mismo DNI)
+        const first = new Date();
+        first.setDate(1);
+        first.setHours(0,0,0,0);
+        const next = new Date(first);
+        next.setMonth(first.getMonth() + 1);
+
+        try {
+          const dnis = Array.from(new Set((data || []).map((p: any) => p.dni).filter(Boolean)));
+          if (dnis.length === 0) return;
+
+          // Buscar todos los pacientes que comparten estos DNIs (pueden ser de otras CAPs)
+          const { data: samePacs } = await supabase.from('pacientes').select('id, dni, cap_id').in('dni', dnis as string[]);
+          const ids = (samePacs || []).map((s: any) => s.id);
+          if (ids.length === 0) return;
+
+          const { data: entregas } = await supabase
+            .from('entregas_anticonceptivos')
+            .select('id, paciente_id, tipo_anticonceptivo_id, cantidad, fecha_entrega, cap_id')
+            .in('paciente_id', ids)
+            .gte('fecha_entrega', first.toISOString())
+            .lt('fecha_entrega', next.toISOString());
+
+          // Map paciente_id -> dni
+          const idToDni: Record<number,string> = {};
+          (samePacs || []).forEach((s: any) => { idToDni[s.id] = s.dni; });
+
+          const entregasByDni: Record<string, any[]> = {};
+          (entregas || []).forEach((e: any) => {
+            const d = idToDni[e.paciente_id];
+            if (!d) return;
+            if (!entregasByDni[d]) entregasByDni[d] = [];
+            entregasByDni[d].push(e);
+          });
+
+          const capIds = Array.from(new Set((entregas || []).map((e: any) => e.cap_id).filter(Boolean)));
+          if (capIds.length > 0) {
+            const { data: caps } = await supabase.from('caps').select('id, numero').in('id', capIds);
+            const cmap: Record<number,string> = {};
+            (caps || []).forEach((c: any) => { cmap[c.id] = c.numero; });
+            setCapNumbers(cmap);
+          }
+
+          setEntregasPorDni(entregasByDni);
+        } catch (err) {
+          // noop
+        }
       }
     } catch (error) {
       console.error('Error fetching pacientes:', error);
@@ -167,7 +216,18 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
     }
 
     try {
-      if (editingId) {
+      if (editingId) {        // Check duplicates when updating: ensure no other patient in same CAP has this DNI
+        const { data: existing } = await supabase
+          .from('pacientes')
+          .select('id')
+          .eq('cap_id', capId)
+          .eq('dni', formData.dni)
+          .maybeSingle();
+
+        if (existing && existing.id && existing.id !== editingId) {
+          toast({ title: 'Error', description: 'Ya existe otro paciente con ese DNI en este CAP.', variant: 'destructive' });
+          return;
+        }
         // Actualizar paciente existente
         const { error } = await supabase
           .from('pacientes')
@@ -186,11 +246,30 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
           description: 'Los datos del paciente se actualizaron correctamente',
         });
       } else {
-        // Crear nuevo paciente
+        // Check if a patient with same DNI exists in the same CAP (prevent duplicate per CAP)
+        const { data: existing } = await supabase
+          .from('pacientes')
+          .select('id')
+          .eq('cap_id', capId)
+          .eq('dni', formData.dni)
+          .maybeSingle();
+
+        if (existing && existing.id) {
+          toast({ title: 'Error', description: 'Ya existe un paciente con ese DNI en este CAP.', variant: 'destructive' });
+          return;
+        }
+
+        // Crear nuevo paciente (validar campos)
+        if (!formData.nombre?.trim() || !formData.apellido?.trim() || !formData.dni?.trim()) {
+          toast({ title: 'Error', description: 'Complete Nombre, Apellido y DNI del paciente.', variant: 'destructive' });
+          return;
+        }
         const { error } = await supabase
           .from('pacientes')
           .insert([{
-            ...formData,
+            nombre: formData.nombre.trim(),
+            apellido: formData.apellido.trim(),
+            dni: formData.dni.trim(),
             edad: parseInt(formData.edad),
             cap_id: capId,
           }]);
@@ -208,10 +287,16 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
       setEditingId(null);
       fetchPacientes();
     } catch (error: any) {
-      console.error('Error saving paciente:', error);
+      console.error('Error saving paciente:', error, error?.message, error?.details);
+      // Detectar conflicto por UNIQUE y dar mensaje más claro
+      const isConflict = error?.status === 409 || /duplicate key|unique constraint/i.test(error?.message || error?.details || '');
+      const description = isConflict
+        ? 'Ya existe un paciente con ese DNI. Si corresponde que el mismo DNI pueda registrarse en varios CAPs, aplica la migración para hacer el DNI único por (dni, cap_id).' 
+        : (error?.message || error?.details || 'No se pudo guardar el paciente');
+
       toast({
         title: 'Error',
-        description: error.message || 'No se pudo guardar el paciente',
+        description,
         variant: 'destructive',
       });
     }
@@ -511,7 +596,20 @@ const PacientesList = ({ capNumber }: PacientesListProps) => {
                                     <TableCell className="font-medium">
                                       {new Date(reg.fecha_entrega).toLocaleDateString('es-AR')}
                                     </TableCell>
-                                    <TableCell>{reg.tipo_anticonceptivo?.nombre || 'Desconocido'}</TableCell>
+                                    <TableCell>
+                                      {reg.tipo_anticonceptivo?.nombre || 'Desconocido'}
+                                      {/* Mostrar si ya fue entregado este mes (incluso en otra CAP con mismo DNI) */}
+                                      {(() => {
+                                        const entregasForDni = entregasPorDni[paciente.dni] || [];
+                                        const match = entregasForDni.find((e: any) => e.tipo_anticonceptivo_id === reg.tipo_anticonceptivo_id);
+                                        if (match) {
+                                          return (
+                                            <span className="ml-2 inline-block bg-secondary/10 text-secondary text-xs px-2 py-0.5 rounded">Entregado este mes (CAP {capNumbers[match.cap_id] || match.cap_id})</span>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
+                                    </TableCell>
                                     <TableCell>{reg.tipo_anticonceptivo?.marca || '-'}</TableCell>
                                     <TableCell className="text-center font-semibold">
                                       {reg.cantidad}

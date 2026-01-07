@@ -5,43 +5,32 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { LogOut, Users, Package, Activity, Settings } from 'lucide-react';
-import StatsCards from './StatsCards';
-import MonthlyReport from './MonthlyReport';
+// Removed unused: StatsCards, MonthlyReport
 import ManageUsers from './ManageUsers';
 import ManageAnticonceptivos from './ManageAnticonceptivos';
 import ManageCaps from './ManageCaps';
 import ManageInventory from './ManageInventory';
 import NotificationsList from './NotificationsList.tsx';
+import AdminDeliveries from './AdminDeliveries';
+import DeliveredPatientsReport from './DeliveredPatientsReport';
+import AdminStockReport from './AdminStockReport';
 
 const AdminDashboard = () => {
   const { signOut, profile } = useAuth();
-  const [stats, setStats] = useState({
-    totalPacientes: 0,
-    totalRegistros: 0,
-    tiposAnticonceptivos: 0,
-  });
+  const [activeTab, setActiveTab] = useState('inventario');
+  const [reportCapId, setReportCapId] = useState<number | null>(null);
 
+  // Listener para navegación por eventos (preseleccionar tab y cap desde otros componentes)
   useEffect(() => {
-    fetchStats();
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent)?.detail;
+      if (!d) return;
+      if (d.tab) setActiveTab(d.tab);
+      if (d.capId) setReportCapId(d.capId);
+    };
+    window.addEventListener('navigate:tab', handler as EventListener);
+    return () => window.removeEventListener('navigate:tab', handler as EventListener);
   }, []);
-
-  const fetchStats = async () => {
-    try {
-      const [pacientes, registros, tipos] = await Promise.all([
-        supabase.from('pacientes').select('id', { count: 'exact', head: true }),
-        supabase.from('registros_anticonceptivos').select('id', { count: 'exact', head: true }),
-        supabase.from('tipos_anticonceptivos').select('id', { count: 'exact', head: true }),
-      ]);
-
-      setStats({
-        totalPacientes: pacientes.count || 0,
-        totalRegistros: registros.count || 0,
-        tiposAnticonceptivos: tipos.count || 0,
-      });
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-background">
@@ -59,16 +48,11 @@ const AdminDashboard = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2">
-            <StatsCards stats={stats} />
-          </div>
-          <div>
-            <NotificationsList admin />
-          </div>
+        <div className="grid grid-cols-1 gap-4">
+          {/* Admin view: notifications hidden by request */}
         </div>
 
-        <Tabs defaultValue="report" className="mt-8">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v)} className="mt-8">
           <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="report" className="gap-2">
               <Activity className="w-4 h-4" />
@@ -86,6 +70,10 @@ const AdminDashboard = () => {
               <Package className="w-4 h-4" />
               Inventario
             </TabsTrigger>
+            <TabsTrigger value="entregas" className="gap-2">
+              <Activity className="w-4 h-4" />
+              Entregas
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2">
               <Settings className="w-4 h-4" />
               Configuración
@@ -93,7 +81,14 @@ const AdminDashboard = () => {
           </TabsList>
 
           <TabsContent value="report">
-            <MonthlyReport />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DeliveredPatientsReport />
+              <AdminStockReport preselectedCapId={reportCapId} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="entregas">
+            <AdminDeliveries />
           </TabsContent>
 
           <TabsContent value="users">
