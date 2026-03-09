@@ -14,6 +14,128 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_likes: {
+        Row: {
+          id: number
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      migration_confirmations: {
+        Row: {
+          id: number
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      avisos_sistema: {
+        Row: {
+          id: number
+          titulo: string
+          mensaje: string
+          tipo: string
+          activo: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          titulo: string
+          mensaje: string
+          tipo?: string
+          activo?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          titulo?: string
+          mensaje?: string
+          tipo?: string
+          activo?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_conversations: {
+        Row: {
+          id: number
+          user_1: string
+          user_2: string
+          last_message_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_1: string
+          user_2: string
+          last_message_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_1?: string
+          user_2?: string
+          last_message_at?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          id: number
+          conversation_id: number
+          sender_id: string
+          content: string
+          created_at: string
+          read_at: string | null
+        }
+        Insert: {
+          id?: number
+          conversation_id: number
+          sender_id: string
+          content: string
+          created_at?: string
+          read_at?: string | null
+        }
+        Update: {
+          id?: number
+          conversation_id?: number
+          sender_id?: string
+          content?: string
+          created_at?: string
+          read_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caps: {
         Row: {
           created_at: string

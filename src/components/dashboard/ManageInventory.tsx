@@ -6,49 +6,73 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import {
+  ChevronDown,
+  ChevronRight,
+  Search,
+  Pencil,
+  Check,
+  X,
+  History,
+  Plus,
+  AlertTriangle,
+  Package,
+} from 'lucide-react';
+
+interface CapInventoryData {
+  capId: number;
+  capNumero: number;
+  capNombre: string;
+  items: any[];
+  totalItems: number;
+  lowStockCount: number;
+}
 
 const ManageInventory = () => {
   const [caps, setCaps] = useState<any[]>([]);
   const [anticonceptivos, setAnticonceptivos] = useState<any[]>([]);
-  const [capId, setCapId] = useState<number | null>(null);
-  const [selectedTipo, setSelectedTipo] = useState<number | null>(null);
-  const [stock, setStock] = useState<number>(0);
-  const [prevStock, setPrevStock] = useState<number | null>(null);
-  const [inventories, setInventories] = useState<any[]>([]);
-  const [search, setSearch] = useState<string>('');
-  const [showLowOnly, setShowLowOnly] = useState<boolean>(false);
-  const [movementsOpen, setMovementsOpen] = useState(false);
-  const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
-  const [movements, setMovements] = useState<any[]>([]);
-  const stockRef = useRef<HTMLInputElement | null>(null);
-  const editingStockRef = useRef<HTMLInputElement | null>(null);
+  const [allInventories, setAllInventories] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  const [showLowOnly, setShowLowOnly] = useState(false);
+  const [expandedCaps, setExpandedCaps] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  // Inline editing
   const [editingInventoryId, setEditingInventoryId] = useState<number | null>(null);
-  const [editingStock, setEditingStock] = useState<number>(0);
+  const [editingStock, setEditingStock] = useState(0);
+  const editingRef = useRef<HTMLInputElement | null>(null);
+
+  // Add new item to a CAP
+  const [addingToCapId, setAddingToCapId] = useState<number | null>(null);
+  const [addTipoId, setAddTipoId] = useState<number | null>(null);
+  const [addStock, setAddStock] = useState(0);
+
+  // Movements dialog
+  const [movementsOpen, setMovementsOpen] = useState(false);
+  const [movementsTitle, setMovementsTitle] = useState('');
+  const [movements, setMovements] = useState<any[]>([]);
+  const [movPage, setMovPage] = useState(1);
+  const MOV_PAGE_SIZE = 10;
+
   const { toast } = useToast();
   const { user } = useAuth();
 
   useEffect(() => {
-    fetchCaps();
-    fetchAnticonceptivos();
+    Promise.all([fetchCaps(), fetchAnticonceptivos(), fetchAllInventories()]);
 
-    // Listener para abrir y preseleccionar cap desde reporte de entregas
     const handler = (e: CustomEvent) => {
       const cid = e?.detail?.capId;
-      if (cid) setCapId(cid);
+      if (cid) setExpandedCaps((prev) => new Set(prev).add(cid));
     };
     window.addEventListener('manage-inventory:open', handler as EventListener);
-
     return () => window.removeEventListener('manage-inventory:open', handler as EventListener);
   }, []);
-
-  useEffect(() => {
-    if (capId) fetchInventories(capId);
-  }, [capId]);
 
   const fetchCaps = async () => {
     const { data } = await supabase.from('caps').select('*').order('numero');
@@ -63,323 +87,549 @@ const ManageInventory = () => {
     setAnticonceptivos(data || []);
   };
 
-  const fetchInventory = async (capId: number, tipoId: number) => {
-    const { data } = await supabase
-      .from('inventario_caps')
-      .select('*')
-      .eq('cap_id', capId)
-      .eq('tipo_anticonceptivo_id', tipoId)
-      .maybeSingle();
-
-    setStock(data?.stock ?? 0);
-    setPrevStock(data?.stock ?? null);
-  };
-
-  const isValidId = (v: any) => typeof v === 'number' && !isNaN(v);
-
-  const fetchInventories = async (capId: number) => {
-    if (!isValidId(capId)) return;
+  const fetchAllInventories = async () => {
+    setLoading(true);
     const { data, error } = await supabase
       .from('inventario_caps')
-      .select('id, stock, tipo_anticonceptivo_id, tipo:tipos_anticonceptivos(id, nombre, marca, codigo)')
-      .eq('cap_id', capId)
+      .select('id, stock, cap_id, tipo_anticonceptivo_id, tipo:tipos_anticonceptivos(id, nombre, marca, codigo)')
       .order('tipo_anticonceptivo_id');
 
     if (error) {
-      console.error('Error fetching inventories', error, error?.message, error?.details);
-      setInventories([]);
-      return;
+      console.error('Error fetching inventories', error);
+      setAllInventories([]);
+    } else {
+      setAllInventories(data || []);
     }
-
-    setInventories(data || []);
+    setLoading(false);
   };
 
-  const fetchMovements = async (inventoryId: number) => {
+  const fetchMovements = async (inventoryId: number, title: string) => {
+    setMovementsTitle(title);
+    setMovPage(1);
+    setMovementsOpen(true);
     const { data } = await supabase
       .from('inventario_movimientos')
       .select('id, tipo, cantidad, paciente_id, created_by, created_at, paciente:pacientes(id, nombre, apellido)')
       .eq('inventario_id', inventoryId)
       .order('created_at', { ascending: false });
-
     setMovements(data || []);
   };
 
-  useEffect(() => {
-    if (capId && selectedTipo) fetchInventory(capId, selectedTipo);
-  }, [capId, selectedTipo]);
+  const toggleCap = (capId: number) => {
+    setExpandedCaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(capId)) next.delete(capId);
+      else next.add(capId);
+      return next;
+    });
+  };
 
-  const handleSave = async () => {
-    if (!capId || !selectedTipo) return;
+  // Group inventories by CAP
+  const capData: CapInventoryData[] = caps.map((cap) => {
+    const items = allInventories.filter((inv) => inv.cap_id === cap.id);
+    const lowStockCount = items.filter((inv) => inv.stock <= 5).length;
+    return {
+      capId: cap.id,
+      capNumero: cap.numero,
+      capNombre: cap.nombre,
+      items,
+      totalItems: items.length,
+      lowStockCount,
+    };
+  });
 
-    try {
-      const { error } = await supabase.from('inventario_caps').upsert([
-        { cap_id: capId, tipo_anticonceptivo_id: selectedTipo, stock },
-      ]);
-
-      if (error) throw error;
-
-      // Registrar movimiento si hubo incremento/disminución (solo admins pueden insertar movimientos segun policies)
-      if (prevStock !== null && prevStock !== stock) {
-        const delta = stock - prevStock;
-        const tipoMov = delta > 0 ? 'in' : 'out';
-
-        const { error: moveError } = await supabase.from('inventario_movimientos').insert([{
-          inventario_id: (await supabase.from('inventario_caps').select('id').eq('cap_id', capId).eq('tipo_anticonceptivo_id', selectedTipo).maybeSingle())?.data?.id,
-          tipo: tipoMov,
-          cantidad: Math.abs(delta),
-          paciente_id: null,
-          created_by: user?.id,
-        }]);
-
-        if (moveError) console.error('Error creating movement:', moveError);
-      }
-
-      toast({ title: 'Guardado', description: 'Stock actualizado correctamente' });
-      fetchInventories(capId);
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'No se pudo actualizar stock', variant: 'destructive' });
+  const filterItems = (items: any[]) => {
+    let filtered = items;
+    if (search) {
+      const term = search.toLowerCase();
+      filtered = filtered.filter((inv) => {
+        const nombre = (inv.tipo?.nombre || '').toLowerCase();
+        const marca = (inv.tipo?.marca || '').toLowerCase();
+        const codigo = (inv.tipo?.codigo || '').toLowerCase();
+        return nombre.includes(term) || marca.includes(term) || codigo.includes(term);
+      });
     }
+    if (showLowOnly) {
+      filtered = filtered.filter((inv) => inv.stock <= 5);
+    }
+    return filtered;
   };
 
   const handleSaveRow = async (inv: any) => {
+    const newStock = editingStock;
     try {
-      const newStock = editingStock;
-
-      // If the inventory row exists, perform an update to avoid accidental inserts/overwrites
       if (inv?.id) {
-        const { data, error } = await supabase.from('inventario_caps').update({ stock: newStock }).eq('id', inv.id).select().maybeSingle();
+        const { data, error } = await supabase
+          .from('inventario_caps')
+          .update({ stock: newStock })
+          .eq('id', inv.id)
+          .select()
+          .maybeSingle();
         if (error) throw error;
-        if (!data) throw new Error('No se pudo encontrar el registro para actualizar');
-      } else {
-        // fallback to upsert when no id is present
-        const { error } = await supabase.from('inventario_caps').upsert([
-          { cap_id: inv.cap_id, tipo_anticonceptivo_id: inv.tipo_anticonceptivo_id, stock: newStock },
-        ]);
-        if (error) throw error;
+        if (!data) throw new Error('No se pudo encontrar el registro');
       }
 
       if (inv.stock !== null && inv.stock !== undefined && inv.stock !== newStock) {
         const delta = newStock - inv.stock;
         const tipoMov = delta > 0 ? 'in' : 'out';
-        const { error: moveError } = await supabase.from('inventario_movimientos').insert([{
-          inventario_id: inv.id,
-          tipo: tipoMov,
-          cantidad: Math.abs(delta),
-          paciente_id: null,
-          created_by: user?.id,
-        }]);
-        if (moveError) console.error('Error creating movement:', moveError);
+        await supabase.from('inventario_movimientos').insert([
+          {
+            inventario_id: inv.id,
+            tipo: tipoMov,
+            cantidad: Math.abs(delta),
+            paciente_id: null,
+            created_by: user?.id,
+          },
+        ]);
       }
 
-      // Update local state immediately to avoid UI reflows/accordion collapse
-      setInventories((prev) => prev.map((p) => (p.id === inv.id ? { ...p, stock: newStock } : p)));
-      // Close editor
+      setAllInventories((prev) =>
+        prev.map((p) => (p.id === inv.id ? { ...p, stock: newStock } : p)),
+      );
       setEditingInventoryId(null);
-      toast({ title: 'Guardado', description: 'Stock actualizado correctamente' });
-      // Fetch in background to make sure server and UI stay in sync (delayed to avoid focus jumps)
-      setTimeout(() => fetchInventories(inv.cap_id), 1000);
+      toast({ title: 'Guardado', description: 'Stock actualizado' });
     } catch (err: any) {
-      console.error('Error saving inventory row:', err);
-      toast({ title: 'Error', description: err.message || 'No se pudo actualizar stock', variant: 'destructive' });
-      // re-fetch to restore the view
-      if (inv?.cap_id) fetchInventories(inv.cap_id);
+      toast({
+        title: 'Error',
+        description: err.message || 'No se pudo actualizar',
+        variant: 'destructive',
+      });
+      fetchAllInventories();
     }
   };
 
+  const handleAddItem = async (capId: number) => {
+    if (!addTipoId) return;
+    try {
+      const { error } = await supabase.from('inventario_caps').upsert([
+        { cap_id: capId, tipo_anticonceptivo_id: addTipoId, stock: addStock },
+      ]);
+      if (error) throw error;
+
+      if (addStock > 0) {
+        const { data: newInv } = await supabase
+          .from('inventario_caps')
+          .select('id')
+          .eq('cap_id', capId)
+          .eq('tipo_anticonceptivo_id', addTipoId)
+          .maybeSingle();
+        if (newInv?.id) {
+          await supabase.from('inventario_movimientos').insert([
+            {
+              inventario_id: newInv.id,
+              tipo: 'in',
+              cantidad: addStock,
+              paciente_id: null,
+              created_by: user?.id,
+            },
+          ]);
+        }
+      }
+
+      toast({ title: 'Agregado', description: 'Producto agregado al inventario' });
+      setAddingToCapId(null);
+      setAddTipoId(null);
+      setAddStock(0);
+      fetchAllInventories();
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'No se pudo agregar',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const StockBadge = ({ stock }: { stock: number }) => {
+    if (stock <= 0)
+      return (
+        <Badge variant="destructive" className="tabular-nums">
+          {stock}
+        </Badge>
+      );
+    if (stock <= 5)
+      return (
+        <Badge variant="secondary" className="tabular-nums">
+          {stock}
+        </Badge>
+      );
+    return (
+      <Badge variant="outline" className="tabular-nums">
+        {stock}
+      </Badge>
+    );
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Inventario por CAP</CardTitle>
+    <div className="space-y-4">
+      {/* Filtros */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre, marca o código..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button
+              variant={showLowOnly ? 'default' : 'outline'}
+              onClick={() => setShowLowOnly((s) => !s)}
+              size="sm"
+              className="gap-2"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              {showLowOnly ? 'Mostrar todos' : 'Solo bajo stock'}
+            </Button>
           </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-3 mb-4">
-          <Input
-            placeholder="Buscar por nombre, marca o código..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-sm"
-          />
-          <Button variant={showLowOnly ? 'default' : 'outline'} onClick={() => setShowLowOnly((s) => !s)} size="sm">
-            {showLowOnly ? 'Mostrar todos' : 'Solo bajo stock'}
-          </Button>
-        </div>
-        <div className="grid grid-cols-3 gap-4 max-w-xl">
-          <div>
-            <Label>CAP</Label>
-            <Select onValueChange={(v) => setCapId(parseInt(v))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar CAP" />
-              </SelectTrigger>
-              <SelectContent>
-                {caps.map((c) => (
-                  <SelectItem key={c.id} value={c.id.toString()}>
-                    {c.numero} - {c.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        </CardContent>
+      </Card>
 
-          <div>
-            <Label>Anticonceptivo</Label>
-            <Select onValueChange={(v) => setSelectedTipo(parseInt(v))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                {anticonceptivos.map((a) => (
-                  <SelectItem key={a.id} value={a.id.toString()}>
-                    {a.codigo ? `${a.codigo} - ` : ''}
-                    {a.nombre}
-                    {a.marca ? ` - ${a.marca}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {/* Lista de CAPs */}
+      {loading ? (
+        <p className="text-center text-muted-foreground py-8">Cargando inventarios...</p>
+      ) : (
+        <div className="space-y-3">
+          {capData.map((cap) => {
+            const isExpanded = expandedCaps.has(cap.capId);
+            const filteredItems = filterItems(cap.items);
+            const hasLow = cap.lowStockCount > 0;
 
-          <div>
-            <Label>Stock</Label>
-            <Input ref={stockRef as any} type="number" min={0} value={stock} onChange={(e) => setStock(parseInt(e.target.value || '0'))} />
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <Button onClick={handleSave} disabled={!capId || !selectedTipo}>
-            Guardar
-          </Button>
-        </div>
-
-        {capId && (
-          <div className="mt-6">
-            <h3 className="text-lg font-medium mb-2">Inventario CAP</h3>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Código</TableHead>
-                  <TableHead>Marca</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {inventories
-                  .filter((inv) => {
-                    if (!search) return true;
-                    const term = search.toLowerCase();
-                    const nombre = (inv.tipo?.nombre || '').toLowerCase();
-                    const marca = (inv.tipo?.marca || '').toLowerCase();
-                    const codigo = (inv.tipo?.codigo || '').toLowerCase();
-                    return (
-                      nombre.includes(term) ||
-                      marca.includes(term) ||
-                      codigo.includes(term)
-                    );
-                  })
-                  .filter((inv) => (showLowOnly ? inv.stock <= 5 : true))
-                  .map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-medium">{inv.tipo?.nombre}</TableCell>
-                    <TableCell>{inv.tipo?.codigo || '-'}</TableCell>
-                    <TableCell>{inv.tipo?.marca || '-'}</TableCell>
-                    <TableCell>
-                      {editingInventoryId === inv.id ? (
-                        <Input ref={editingStockRef as any} type="number" min={0} value={editingStock} onChange={(e) => setEditingStock(parseInt(e.target.value || '0'))} className="w-24" />
-                      ) : (
-                        inv.stock <= 0 ? (
-                          <Badge variant="destructive">{inv.stock}</Badge>
-                        ) : inv.stock <= 5 ? (
-                          <Badge variant="secondary">{inv.stock}</Badge>
-                        ) : (
-                          <Badge variant="outline">{inv.stock}</Badge>
-                        )
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      {editingInventoryId === inv.id ? (
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" onClick={() => handleSaveRow(inv)}>Guardar</Button>
-                          <Button variant="ghost" size="sm" onClick={() => setEditingInventoryId(null)}>Cancelar</Button>
+            return (
+              <Collapsible
+                key={cap.capId}
+                open={isExpanded}
+                onOpenChange={() => toggleCap(cap.capId)}
+              >
+                <Card
+                  className={cn(
+                    'transition-shadow',
+                    isExpanded && 'shadow-md ring-1 ring-primary/20',
+                  )}
+                >
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className="cursor-pointer select-none hover:bg-muted/50 transition-colors py-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {isExpanded ? (
+                            <ChevronDown className="h-5 w-5 text-primary" />
+                          ) : (
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                          )}
+                          <div>
+                            <CardTitle className="text-base">
+                              CAP {cap.capNumero} — {cap.capNombre}
+                            </CardTitle>
+                          </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="gap-1">
+                            <Package className="h-3 w-3" />
+                            {cap.totalItems} productos
+                          </Badge>
+                          {hasLow && (
+                            <Badge variant="destructive" className="gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              {cap.lowStockCount} bajo stock
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                  </CollapsibleTrigger>
+
+                  <CollapsibleContent>
+                    <CardContent className="pt-0">
+                      {filteredItems.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4 text-center">
+                          {search || showLowOnly
+                            ? 'No hay productos que coincidan con el filtro'
+                            : 'Sin productos en este CAP'}
+                        </p>
                       ) : (
-                        <>
-                          <Button variant="ghost" size="sm" onClick={() => {
-                            // Solo activar edición inline para esta fila (no cambiar filtros superiores)
-                            setEditingInventoryId(inv.id);
-                            setEditingStock(inv.stock);
-                            setTimeout(() => (editingStockRef.current as any)?.focus?.(), 0);
-                          }}>
-                            Editar
-                          </Button>
-                          <Dialog 
-                            open={movementsOpen && selectedInventoryId === inv.id} 
-                            onOpenChange={(o) => { 
-                              if (!o) {
-                                setSelectedInventoryId(null);
-                                setMovements([]);
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[80px]">Código</TableHead>
+                              <TableHead>Producto</TableHead>
+                              <TableHead>Marca</TableHead>
+                              <TableHead className="w-[120px]">Stock</TableHead>
+                              <TableHead className="text-right w-[160px]">Acciones</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredItems.map((inv) => (
+                              <TableRow key={inv.id}>
+                                <TableCell className="text-muted-foreground text-xs font-mono">
+                                  {inv.tipo?.codigo || '—'}
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  {inv.tipo?.nombre}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {inv.tipo?.marca || '—'}
+                                </TableCell>
+                                <TableCell>
+                                  {editingInventoryId === inv.id ? (
+                                    <Input
+                                      ref={editingRef}
+                                      type="number"
+                                      min={0}
+                                      value={editingStock}
+                                      onChange={(e) =>
+                                        setEditingStock(parseInt(e.target.value || '0'))
+                                      }
+                                      className="w-20 h-8"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSaveRow(inv);
+                                        if (e.key === 'Escape') setEditingInventoryId(null);
+                                      }}
+                                    />
+                                  ) : (
+                                    <StockBadge stock={inv.stock} />
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {editingInventoryId === inv.id ? (
+                                    <div className="flex justify-end gap-1">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8 text-green-600"
+                                        onClick={() => handleSaveRow(inv)}
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8"
+                                        onClick={() => setEditingInventoryId(null)}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex justify-end gap-1">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8"
+                                        title="Editar stock"
+                                        onClick={() => {
+                                          setEditingInventoryId(inv.id);
+                                          setEditingStock(inv.stock);
+                                          setTimeout(
+                                            () => editingRef.current?.focus(),
+                                            0,
+                                          );
+                                        }}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8"
+                                        title="Ver movimientos"
+                                        onClick={() =>
+                                          fetchMovements(
+                                            inv.id,
+                                            inv.tipo?.nombre || 'Producto',
+                                          )
+                                        }
+                                      >
+                                        <History className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+
+                      {/* Agregar producto */}
+                      {addingToCapId === cap.capId ? (
+                        <div
+                          className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3"
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex-1 min-w-[200px]">
+                            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                              Anticonceptivo
+                            </label>
+                            <select
+                              className="flex h-9 w-full items-center rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                              value={addTipoId?.toString() || ''}
+                              onChange={(e) =>
+                                setAddTipoId(e.target.value ? parseInt(e.target.value) : null)
                               }
-                              setMovementsOpen(o);
+                            >
+                              <option value="">Seleccionar...</option>
+                              {anticonceptivos
+                                .filter(
+                                  (a) =>
+                                    !cap.items.some(
+                                      (inv) => inv.tipo_anticonceptivo_id === a.id,
+                                    ),
+                                )
+                                .map((a) => (
+                                  <option key={a.id} value={a.id.toString()}>
+                                    {a.codigo ? `${a.codigo} — ` : ''}
+                                    {a.nombre}
+                                    {a.marca ? ` — ${a.marca}` : ''}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <div className="w-24">
+                            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                              Stock inicial
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={addStock}
+                              onChange={(e) =>
+                                setAddStock(parseInt(e.target.value || '0'))
+                              }
+                              className="h-9"
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => handleAddItem(cap.capId)}
+                            disabled={!addTipoId}
+                          >
+                            Agregar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setAddingToCapId(null);
+                              setAddTipoId(null);
+                              setAddStock(0);
                             }}
                           >
-                            <DialogTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                onClick={async () => { 
-                                  setSelectedInventoryId(inv.id); 
-                                  setMovementsOpen(true); 
-                                  await fetchMovements(inv.id); 
-                                }}
-                              >
-                                Ver Movimientos
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>Movimientos - {inv.tipo?.nombre}</DialogTitle>
-                              </DialogHeader>
-                              <div className="py-2">
-                                {movements.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground">Sin movimientos</p>
-                                ) : (
-                                  <ul className="space-y-2">
-                                    {movements.map((m) => (
-                                      <li key={m.id} className="flex justify-between">
-                                        <div>
-                                          <div className="text-sm">{m.tipo === 'in' ? 'Ingreso' : 'Egreso'} • {m.cantidad}</div>
-                                          <div className="text-xs text-muted-foreground">{m.paciente ? `${m.paciente.apellido}, ${m.paciente.nombre}` : m.created_by} • {format(new Date(m.created_at), 'yyyy-MM-dd HH:mm')}</div>
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                              <DialogFooter>
-                                <Button onClick={() => {
-                                  setMovementsOpen(false);
-                                  setSelectedInventoryId(null);
-                                  setMovements([]);
-                                }}>Cerrar</Button>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
-                        </>
+                            Cancelar
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mt-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => setAddingToCapId(cap.capId)}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Agregar producto
+                          </Button>
+                        </div>
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Dialog de movimientos con paginación */}
+      <Dialog
+        open={movementsOpen}
+        onOpenChange={(o) => {
+          if (!o) setMovements([]);
+          setMovementsOpen(o);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Movimientos — {movementsTitle}</DialogTitle>
+          </DialogHeader>
+          {(() => {
+            const totalPages = Math.max(1, Math.ceil(movements.length / MOV_PAGE_SIZE));
+            const paged = movements.slice(
+              (movPage - 1) * MOV_PAGE_SIZE,
+              movPage * MOV_PAGE_SIZE,
+            );
+            return (
+              <>
+                <div className="py-2">
+                  {movements.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Sin movimientos registrados
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {paged.map((m) => (
+                        <li
+                          key={m.id}
+                          className="flex items-center justify-between rounded-lg border px-3 py-2"
+                        >
+                          <div>
+                            <div className="text-sm font-medium">
+                              {m.tipo === 'in' ? (
+                                <span className="text-green-600">+ Ingreso</span>
+                              ) : (
+                                <span className="text-red-600">— Egreso</span>
+                              )}{' '}
+                              • {m.cantidad} uds
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {m.paciente
+                                ? `${m.paciente.apellido}, ${m.paciente.nombre}`
+                                : 'Manual'}{' '}
+                              • {format(new Date(m.created_at), 'dd/MM/yyyy HH:mm')}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <span className="text-xs text-muted-foreground">
+                      {movements.length} movimientos — Página {movPage}/{totalPages}
+                    </span>
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={movPage <= 1}
+                        onClick={() => setMovPage((p) => Math.max(1, p - 1))}
+                      >
+                        Anterior
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={movPage >= totalPages}
+                        onClick={() => setMovPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+          <DialogFooter>
+            <Button onClick={() => setMovementsOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };
 
