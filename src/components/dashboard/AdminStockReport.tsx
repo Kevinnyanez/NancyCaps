@@ -79,17 +79,26 @@ const AdminStockReport = ({ preselectedCapId = null }: AdminStockReportProps) =>
   };
 
   const handleGenerateOrder = () => {
-    // generar CSV solo con ítems sugeridos (>0)
+    // generar pedido global (todos los CAPs) solo con ítems sugeridos (>0) en XLSX
     const perCap = computeSuggested();
-    const rows: any[] = [];
-    Object.entries(perCap).forEach(([capId, items]) => {
-      const cap = caps.find(c => c.id === parseInt(capId));
+    const aggregated: Record<string, { tipo: string; marca: string; quantity: number }> = {};
+
+    Object.entries(perCap).forEach(([_capId, items]) => {
       (items as any[]).forEach(it => {
-        if (it.suggested > 0) rows.push({ cap: cap ? `${cap.numero} - ${cap.nombre}` : capId, tipo: it.tipo, marca: it.marca, quantity: it.suggested });
+        if (it.suggested > 0) {
+          const key = `${it.tipo}|${it.marca}`;
+          if (!aggregated[key]) {
+            aggregated[key] = { tipo: it.tipo, marca: it.marca, quantity: 0 };
+          }
+          aggregated[key].quantity += it.suggested;
+        }
       });
     });
 
-    downloadCSV(`pedido_sugerido_${new Date().toISOString().slice(0,10)}.csv`, rows);
+    const rows = Object.values(aggregated);
+    void exportToExcel(`pedido_total_${new Date().toISOString().slice(0,10)}.xlsx`, rows).catch(err =>
+      console.error('Export order failed', err),
+    );
   };
 
   const perCap = computeSuggested();

@@ -162,6 +162,7 @@ export type Database = {
           created_at: string
           descripcion: string | null
           id: number
+          codigo: string | null
           marca: string | null
           nombre: string
           stock: number
@@ -170,6 +171,7 @@ export type Database = {
           created_at?: string
           descripcion?: string | null
           id?: number
+          codigo?: string | null
           marca?: string | null
           nombre: string
           stock?: number
@@ -178,6 +180,7 @@ export type Database = {
           created_at?: string
           descripcion?: string | null
           id?: number
+          codigo?: string | null
           marca?: string | null
           nombre?: string
           stock?: number

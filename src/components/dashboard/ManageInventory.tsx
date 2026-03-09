@@ -56,7 +56,10 @@ const ManageInventory = () => {
   };
 
   const fetchAnticonceptivos = async () => {
-    const { data } = await supabase.from('tipos_anticonceptivos').select('*').order('nombre');
+    const { data } = await supabase
+      .from('tipos_anticonceptivos')
+      .select('id, nombre, marca, codigo')
+      .order('nombre');
     setAnticonceptivos(data || []);
   };
 
@@ -78,7 +81,7 @@ const ManageInventory = () => {
     if (!isValidId(capId)) return;
     const { data, error } = await supabase
       .from('inventario_caps')
-      .select('id, stock, tipo_anticonceptivo_id, tipo:tipos_anticonceptivos(id, nombre, marca)')
+      .select('id, stock, tipo_anticonceptivo_id, tipo:tipos_anticonceptivos(id, nombre, marca, codigo)')
       .eq('cap_id', capId)
       .order('tipo_anticonceptivo_id');
 
@@ -195,7 +198,12 @@ const ManageInventory = () => {
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-3 mb-4">
-          <Input placeholder="Buscar por nombre..." value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-sm" />
+          <Input
+            placeholder="Buscar por nombre, marca o código..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-sm"
+          />
           <Button variant={showLowOnly ? 'default' : 'outline'} onClick={() => setShowLowOnly((s) => !s)} size="sm">
             {showLowOnly ? 'Mostrar todos' : 'Solo bajo stock'}
           </Button>
@@ -226,7 +234,9 @@ const ManageInventory = () => {
               <SelectContent>
                 {anticonceptivos.map((a) => (
                   <SelectItem key={a.id} value={a.id.toString()}>
+                    {a.codigo ? `${a.codigo} - ` : ''}
                     {a.nombre}
+                    {a.marca ? ` - ${a.marca}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -252,6 +262,7 @@ const ManageInventory = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Tipo</TableHead>
+                  <TableHead>Código</TableHead>
                   <TableHead>Marca</TableHead>
                   <TableHead>Stock</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
@@ -259,11 +270,23 @@ const ManageInventory = () => {
               </TableHeader>
               <TableBody>
                 {inventories
-                  .filter((inv) => (search ? (inv.tipo?.nombre || '').toLowerCase().includes(search.toLowerCase()) : true))
+                  .filter((inv) => {
+                    if (!search) return true;
+                    const term = search.toLowerCase();
+                    const nombre = (inv.tipo?.nombre || '').toLowerCase();
+                    const marca = (inv.tipo?.marca || '').toLowerCase();
+                    const codigo = (inv.tipo?.codigo || '').toLowerCase();
+                    return (
+                      nombre.includes(term) ||
+                      marca.includes(term) ||
+                      codigo.includes(term)
+                    );
+                  })
                   .filter((inv) => (showLowOnly ? inv.stock <= 5 : true))
                   .map((inv) => (
                   <TableRow key={inv.id}>
                     <TableCell className="font-medium">{inv.tipo?.nombre}</TableCell>
+                    <TableCell>{inv.tipo?.codigo || '-'}</TableCell>
                     <TableCell>{inv.tipo?.marca || '-'}</TableCell>
                     <TableCell>
                       {editingInventoryId === inv.id ? (
@@ -294,9 +317,26 @@ const ManageInventory = () => {
                           }}>
                             Editar
                           </Button>
-                          <Dialog open={movementsOpen && selectedInventoryId === inv.id} onOpenChange={(o) => { setMovementsOpen(o); if (!o) { setSelectedInventoryId(null); setMovements([]); } }}>
+                          <Dialog 
+                            open={movementsOpen && selectedInventoryId === inv.id} 
+                            onOpenChange={(o) => { 
+                              if (!o) {
+                                setSelectedInventoryId(null);
+                                setMovements([]);
+                              }
+                              setMovementsOpen(o);
+                            }}
+                          >
                             <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={async () => { setSelectedInventoryId(inv.id); setMovementsOpen(true); await fetchMovements(inv.id); }}>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={async () => { 
+                                  setSelectedInventoryId(inv.id); 
+                                  setMovementsOpen(true); 
+                                  await fetchMovements(inv.id); 
+                                }}
+                              >
                                 Ver Movimientos
                               </Button>
                             </DialogTrigger>
@@ -321,7 +361,11 @@ const ManageInventory = () => {
                                 )}
                               </div>
                               <DialogFooter>
-                                <Button onClick={() => setMovementsOpen(false)}>Cerrar</Button>
+                                <Button onClick={() => {
+                                  setMovementsOpen(false);
+                                  setSelectedInventoryId(null);
+                                  setMovements([]);
+                                }}>Cerrar</Button>
                               </DialogFooter>
                             </DialogContent>
                           </Dialog>

@@ -15,6 +15,7 @@ const ManageAnticonceptivos = () => {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
+    codigo: '',
     nombre: '',
     marca: '',
     descripcion: '',
@@ -73,8 +74,8 @@ const ManageAnticonceptivos = () => {
       }
 
       setOpen(false);
-      setFormData({ nombre: '', marca: '', descripcion: '' });
       setEditingId(null);
+      setFormData({ codigo: '', nombre: '', marca: '', descripcion: '' });
       fetchAnticonceptivos();
     } catch (error: any) {
       toast({
@@ -88,6 +89,7 @@ const ManageAnticonceptivos = () => {
   const handleEdit = (item: any) => {
     setEditingId(item.id);
     setFormData({
+      codigo: item.codigo || '',
       nombre: item.nombre,
       marca: item.marca || '',
       descripcion: item.descripcion || '',
@@ -133,7 +135,7 @@ const ManageAnticonceptivos = () => {
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button onClick={() => { setEditingId(null); setFormData({ nombre: '', marca: '', descripcion: '' }); }}>
+              <Button onClick={() => { setEditingId(null); setFormData({ codigo: '', nombre: '', marca: '', descripcion: '' }); }}>
                 <Plus className="w-4 h-4 mr-2" />
                 Nuevo
               </Button>
@@ -156,6 +158,14 @@ const ManageAnticonceptivos = () => {
                       value={formData.nombre}
                       onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                       required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="codigo">Código</Label>
+                    <Input
+                      id="codigo"
+                      value={formData.codigo}
+                      onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
@@ -192,6 +202,7 @@ const ManageAnticonceptivos = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Nombre</TableHead>
+                <TableHead>Código</TableHead>
                 <TableHead>Marca</TableHead>
                 <TableHead>Descripción</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
@@ -201,6 +212,7 @@ const ManageAnticonceptivos = () => {
               {anticonceptivos.map((item) => (
                 <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.nombre}</TableCell>
+                  <TableCell>{item.codigo || '-'}</TableCell>
                   <TableCell>{item.marca || '-'}</TableCell>
                   <TableCell>{item.descripcion || '-'}</TableCell>
                   <TableCell className="text-right space-x-2">

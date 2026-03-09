@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-const NotifyCapsModal = React.lazy(() => import('./NotifyCapsModal'));
+import NotifyCapsModal from './NotifyCapsModal';
 import PatientDetailModal from './PatientDetailModal';
 
 import { supabase } from '@/integrations/supabase/client';
@@ -262,20 +262,21 @@ const DeliveredPatientsReport = () => {
         )}
       </CardContent>
       {notifyPayload && (
-        // dynamic import of modal to avoid loading extra code when not needed
-        <React.Suspense fallback={null}>
-          {/* @ts-ignore */}
-          <NotifyCapsModal
-            open={notifyOpen}
-            onOpenChange={(o: boolean) => { setNotifyOpen(o); if (!o) setNotifyPayload(null); }}
-            dni={notifyPayload.dni}
-            pacienteName={notifyPayload.pacienteName}
-            tipoId={notifyPayload.tipoId}
-            tipoNombre={notifyPayload.tipoNombre}
-            origenCapId={notifyPayload.origenCapId}
-            destinations={notifyPayload.destinations || []}
-          />
-        </React.Suspense>
+        <NotifyCapsModal
+          open={notifyOpen}
+          onOpenChange={(o: boolean) => { 
+            if (!o) {
+              setNotifyPayload(null);
+            }
+            setNotifyOpen(o);
+          }}
+          dni={notifyPayload.dni}
+          pacienteName={notifyPayload.pacienteName}
+          tipoId={notifyPayload.tipoId}
+          tipoNombre={notifyPayload.tipoNombre}
+          origenCapId={notifyPayload.origenCapId}
+          destinations={notifyPayload.destinations || []}
+        />
       )}
 
       {patientModalPayload && (
